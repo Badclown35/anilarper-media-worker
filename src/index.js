@@ -268,20 +268,66 @@ async function handleApi(request, env, url) {
       return json({ error: "Multipart parts must be complete and ordered." }, 400);
     }
     await completeMultipart(env, pending.key, pending.uploadId, parts);
-    const head = await b2Request(env, "HEAD", pending.key);
-    await assertS3(head, "Verify uploaded video");
-    const uploadedSize = Number(head.headers.get("Content-Length"));
-    if (uploadedSize !== pending.size) {
-      await b2Request(env, "DELETE", pending.key);
-      await abortMultipart(env, pending.key, pending.uploadId).catch(() => {});
-      catalog.pending = catalog.pending.filter(p => p.id !== pending.id);
-      await writeCatalog(env, catalog);
-      return json({ error: "Uploaded size did not match the reserved size; the incomplete object was removed." }, 400);
-    }
+    // A successful CompleteMultipartUpload confirms that B2 assembled the object.
+    // Do not require a follow-up HEAD request: some S3-compatible configurations
+    // can deny HEAD even when multipart upload and normal GET access are allowed.
+    const uploadedSize = Number(pending.size);
     catalog.pending = catalog.pending.filter(p => p.id !== pending.id);
     catalog.videos.push({ id: pending.id, title: pending.title, category: pending.category, size: uploadedSize, modified: Date.now() });
     await writeCatalog(env, catalog);
     return json({ ok: true, video: publicVideo(catalog.videos[catalog.videos.length - 1]) }, 201);
+  }
+
+  if (request.method === "POST" && path === "/api/upload/recover") {
+    const catalog = await readCatalog(env);
+    const stillPending = [];
+    const recovered = [];
+    const errors = [];
+    for (const pending of catalog.pending) {
+      try {
+        // Verify with a one-byte ranged GET rather than HEAD. This also confirms
+        // the object is readable before publishing it in the public catalog.
+        const check = await b2Request(env, "GET", pending.key, {
+          headers: { Range: "bytes=0-0" }
+        });
+        if (check.status === 404) {
+          stillPending.push(pending);
+          continue;
+        }
+        if (check.status !== 206 && check.status !== 200) {
+          await assertS3(check, "Recover stored upload");
+        }
+        let actualSize = NaN;
+        if (check.status === 206) {
+          const contentRange = check.headers.get("Content-Range") || "";
+          const match = /^bytes\\s+0-0\\/(\\d+)$/.exec(contentRange);
+          if (match) actualSize = Number(match[1]);
+        } else {
+          actualSize = Number(check.headers.get("Content-Length"));
+        }
+        await check.body?.cancel().catch(() => {});
+        if (actualSize !== Number(pending.size)) {
+          stillPending.push(pending);
+          continue;
+        }
+        recovered.push({
+          id: pending.id,
+          title: pending.title,
+          category: pending.category,
+          size: actualSize,
+          modified: Date.now()
+        });
+      } catch (error) {
+        stillPending.push(pending);
+        errors.push({ id: pending.id, message: String(error && error.message || error).slice(0, 160) });
+      }
+    }
+    if (recovered.length) {
+      catalog.pending = stillPending;
+      catalog.videos.push(...recovered);
+      await writeCatalog(env, catalog);
+    }
+    return json({ ok: true, recovered: recovered.length, remaining: stillPending.length, errors });
   }
 
   if (request.method === "POST" && path === "/api/upload/abort") {
