@@ -300,6 +300,7 @@ async function handleApi(request, env, url) {
         let actualSize = NaN;
         if (check.status === 206) {
           const contentRange = check.headers.get("Content-Range") || "";
+          // Parse the total object size from the one-byte ranged GET response.
           const match = /^bytes\s+0-0\/(\d+)$/.exec(contentRange);
           if (match) actualSize = Number(match[1]);
         } else {
