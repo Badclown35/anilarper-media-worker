@@ -6,6 +6,7 @@ class MemoryS3 {
   constructor() {
     this.objects = new Map();
     this.sessions = new Map();
+    this.denyHead = false;
   }
   async fetch(input, init = {}) {
     const url = new URL(input);
@@ -51,6 +52,7 @@ class MemoryS3 {
     }
     const bytes = this.objects.get(path);
     if (!bytes) return new Response("not found", { status: 404 });
+    if (method === "HEAD" && this.denyHead) return new Response("forbidden", { status: 403 });
     const headers = new Headers({
       "Content-Length": String(bytes.length),
       "Content-Type": path.endsWith(".json") ? "application/json" : "video/mp4",
@@ -100,8 +102,9 @@ test("health and public catalog are available without admin credentials", async 
   assert.deepEqual((await catalog.json()).videos, []);
 });
 
-test("uploads require admin auth and public media supports byte ranges", async () => {
+test("uploads require admin auth and public media supports byte ranges without relying on HEAD", async () => {
   const e = env();
+  e.S3_CLIENT.denyHead = true;
   const denied = await worker.fetch(request("/api/upload/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -142,6 +145,42 @@ test("uploads require admin auth and public media supports byte ranges", async (
   assert.equal(range.status, 206);
   assert.equal(range.headers.get("Content-Range"), "bytes 1-2/3");
   assert.equal(await range.text(), "BC");
+});
+
+test("admin can recover completed stored uploads when HEAD is denied", async () => {
+  const e = env();
+  e.S3_CLIENT.denyHead = true;
+  await e.S3_CLIENT.fetch("https://s3.test/bucket/media/recovered_clip.mp4", {
+    method: "PUT",
+    body: new Uint8Array([65, 66, 67])
+  });
+  await e.S3_CLIENT.fetch("https://s3.test/bucket/_anilarper/catalog.json", {
+    method: "PUT",
+    body: JSON.stringify({
+      videos: [],
+      pending: [{
+        id: "recovered_clip.mp4",
+        key: "media/recovered_clip.mp4",
+        uploadId: "already-completed",
+        size: 3,
+        title: "Recovered Clip",
+        category: "Anime",
+        created: Date.now()
+      }]
+    })
+  });
+  const recovered = await worker.fetch(request("/api/upload/recover", {
+    method: "POST",
+    headers: { ...adminHeaders, "Content-Type": "application/json" },
+    body: "{}"
+  }), e);
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).recovered, 1);
+  const catalog = await worker.fetch(request("/api/videos"), e);
+  const data = await catalog.json();
+  assert.equal(data.videos.length, 1);
+  assert.equal(data.videos[0].title, "Recovered Clip");
+  assert.equal(data.storage.pendingBytes, 0);
 });
 
 test("storage cap rejects new uploads and admin can edit/delete", async () => {
