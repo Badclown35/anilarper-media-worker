@@ -1,0 +1,14 @@
+name = "anilarper-media-api"
+main = "src/index.js"
+compatibility_date = "2026-11-09"
+workers_dev = true
+
+[vars]
+B2_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"
+B2_REGION = "us-east-005"
+B2_BUCKET = "anilarper-media"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/admin"]
