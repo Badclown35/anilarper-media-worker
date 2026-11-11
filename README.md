@@ -80,3 +80,9 @@ Uploads use 8 MiB parts. Individual videos are capped at 5 GiB and completed plu
 Run `npm test` and `npm run check` from this directory. The tests use an in-memory S3-compatible mock; they do not prove that the real Backblaze key, bucket, account limits, or Cloudflare deployment works. After deployment, verify `/api/health`, upload a small MP4 from `/admin`, play it in Anilarper, seek within it, and delete it.
 
 The repository changes do not create provider accounts, store secrets, or deploy the Worker on your behalf.
+
+---
+
+## AI-assisted development
+
+> **Vibe coded with AI.** This project was built and iterated on with AI assistance, guided by human ideas, prompts, testing, and decisions. AI-generated contributions may contain mistakes; review and verify changes before use.
