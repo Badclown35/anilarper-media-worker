@@ -125,7 +125,7 @@ async function readPhoneLibrary(env) {
       category: cleanText(v.category, 40) || "Uncategorized",
       size: Number(v.size || 0),
       modified: Number(v.modified || 0),
-      streamPath: "/media/phone--" + encodeURIComponent(String(v.id || ""))
+      streamPath: "/media/phone--" + String(v.id || "")
     })).filter(v => /^phone--[A-Za-z0-9._ -]+\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
     return {
       online: true,
@@ -145,9 +145,9 @@ async function readPhoneLibrary(env) {
 async function streamPhoneMedia(request, env, filename) {
   const origin = String(env.PHONE_ORIGIN || "").replace(/\/$/, "");
   if (!origin || !/^[A-Za-z0-9._ -]+\.mp4$/i.test(filename)) return json({ error: "Phone video unavailable." }, 404);
-  const headers = {};
+  const headers = new Headers();
   const range = request.headers.get("Range");
-  if (range) headers.set ? headers.set("Range", range) : headers.Range = range;
+  if (range) headers.set("Range", range);
   const upstream = await fetch(origin + "/media/" + encodeURIComponent(filename), {
     method: request.method,
     headers,
