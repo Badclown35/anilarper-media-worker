@@ -107,6 +107,60 @@ async function writeCatalog(env, catalog) {
 function publicVideo(v) {
   return { id: v.id, title: v.title, category: v.category, size: v.size, modified: v.modified, streamPath: "/media/" + v.id };
 }
+
+async function readPhoneLibrary(env) {
+  const origin = String(env.PHONE_ORIGIN || "").replace(/\/$/, "");
+  if (!origin) return { online: false, videos: [], storage: null };
+  try {
+    const [catalogResponse, storageResponse] = await Promise.all([
+      fetch(origin + "/api/videos", { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) }),
+      fetch(origin + "/api/storage", { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) })
+    ]);
+    if (!catalogResponse.ok || !storageResponse.ok) throw new Error("Phone server unavailable");
+    const catalog = await catalogResponse.json();
+    const storage = await storageResponse.json();
+    const videos = (Array.isArray(catalog.videos) ? catalog.videos : []).map(v => ({
+      id: "phone--" + String(v.id || ""),
+      title: cleanText(v.title, 120),
+      category: cleanText(v.category, 40) || "Uncategorized",
+      size: Number(v.size || 0),
+      modified: Number(v.modified || 0),
+      streamPath: "/media/phone--" + encodeURIComponent(String(v.id || ""))
+    })).filter(v => /^phone--[A-Za-z0-9._ -]+\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
+    return {
+      online: true,
+      videos,
+      storage: {
+        totalBytes: Number(storage.totalBytes || 0),
+        usedBytes: Number(storage.usedBytes || 0),
+        freeBytes: Number(storage.freeBytes || 0),
+        mediaBytes: Number(storage.mediaBytes || 0)
+      }
+    };
+  } catch (_) {
+    return { online: false, videos: [], storage: null };
+  }
+}
+
+async function streamPhoneMedia(request, env, filename) {
+  const origin = String(env.PHONE_ORIGIN || "").replace(/\/$/, "");
+  if (!origin || !/^[A-Za-z0-9._ -]+\.mp4$/i.test(filename)) return json({ error: "Phone video unavailable." }, 404);
+  const headers = {};
+  const range = request.headers.get("Range");
+  if (range) headers.set ? headers.set("Range", range) : headers.Range = range;
+  const upstream = await fetch(origin + "/media/" + encodeURIComponent(filename), {
+    method: request.method,
+    headers,
+    signal: AbortSignal.timeout(30000)
+  });
+  const out = {};
+  for (const name of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"]) {
+    const value = upstream.headers.get(name);
+    if (value) out[name] = value;
+  }
+  out["Cache-Control"] = "public, max-age=300";
+  return respond(request.method === "HEAD" ? null : upstream.body, upstream.status, out);
+}
 async function streamMedia(request, env, id) {
   const catalog = await readCatalog(env);
   const video = catalog.videos.find(v => v.id === id);
@@ -204,14 +258,32 @@ async function handleApi(request, env, url) {
     return json({ ok: true, service: "Anilarper B2 Media", version: 2, maxStorageBytes: MAX_STORAGE_BYTES });
   }
   if (request.method === "GET" && path === "/api/videos") {
-    const catalog = await readCatalog(env);
-    const usedBytes = catalog.videos.reduce((sum, v) => sum + Number(v.size || 0), 0);
+    const [catalog, phone] = await Promise.all([readCatalog(env), readPhoneLibrary(env)]);
+    const cloudUsedBytes = catalog.videos.reduce((sum, v) => sum + Number(v.size || 0), 0);
     const pendingBytes = catalog.pending.reduce((sum, p) => sum + Number(p.size || 0), 0);
-    return json({ videos: catalog.videos.map(publicVideo), storage: { usedBytes, pendingBytes, maxBytes: MAX_STORAGE_BYTES } });
+    const phoneDiskUsed = phone.online ? phone.storage.usedBytes : 0;
+    const phoneTotal = phone.online ? phone.storage.totalBytes : 0;
+    const cloudVideos = catalog.videos.map(v => ({ ...publicVideo(v), storageLocation: "cloud" }));
+    const cloudKeys = new Set(catalog.videos.map(v => String(v.size || 0) + "|" + cleanText(v.title, 120).toLowerCase()));
+    const phoneVideos = phone.videos
+      .filter(v => !cloudKeys.has(String(v.size) + "|" + v.title.toLowerCase()))
+      .map(v => ({ ...v, storageLocation: "phone" }));
+    return json({
+      videos: [...cloudVideos, ...phoneVideos],
+      storage: {
+        usedBytes: cloudUsedBytes + phoneDiskUsed,
+        pendingBytes,
+        maxBytes: MAX_STORAGE_BYTES + phoneTotal,
+        cloud: { usedBytes: cloudUsedBytes, pendingBytes, maxBytes: MAX_STORAGE_BYTES },
+        phone: phone.online ? { usedBytes: phoneDiskUsed, mediaBytes: phone.storage.mediaBytes, freeBytes: phone.storage.freeBytes, totalBytes: phoneTotal, online: true } : { online: false },
+        phoneOnline: phone.online
+      }
+    });
   }
   if (path.startsWith("/media/") && (request.method === "GET" || request.method === "HEAD")) {
     let id;
     try { id = decodeURIComponent(path.slice(7)); } catch (_) { return json({ error: "Invalid video ID." }, 404); }
+    if (id.startsWith("phone--")) return streamPhoneMedia(request, env, id.slice(7));
     if (!/^[A-Za-z0-9-]+_[A-Za-z0-9._ -]+\.mp4$/i.test(id)) return json({ error: "Invalid video ID." }, 404);
     return streamMedia(request, env, id);
   }
