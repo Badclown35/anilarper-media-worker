@@ -9,7 +9,7 @@ This setup does not make storage or bandwidth unlimited. Check the current Backb
 - Backblaze bucket: `anilarper-media` in region `us-east-005`.
 - Bucket access should remain **Private**. Do not switch it to Public.
 - `GET /api/videos` and `GET /media/{id}` are public through the Worker. The Worker signs requests to the private B2 bucket and streams the response, including HTTP byte ranges.
-- When `PHONE_ORIGIN` is configured, the Worker also reads the backup phone's catalog and storage report and proxies phone-hosted MP4 streams over HTTPS. The phone must remain online for those videos to play.
+- When `PHONE_STORAGE_URL` (the original setting) or its `PHONE_ORIGIN` alias is configured, the Worker also reads the backup phone's catalog and storage report and proxies phone-hosted MP4 streams over HTTPS. The phone must remain online for those videos to play.
 - Upload, edit, delete, and multipart endpoints require the separate Worker secret `ADMIN_TOKEN`.
 - The B2 Application Key ID and Application Key are Worker secrets named `B2_KEY_ID` and `B2_APP_KEY`. Never put them in the Android app, browser JavaScript, GitHub, screenshots, or chat.
 - Use a standard, bucket-scoped application key, not the Backblaze master key. Backblaze's S3-compatible API uses Signature Version 4 and maps the Application Key ID to the access key ID and the Application Key to the secret access key.
@@ -64,11 +64,11 @@ The Worker can expose the backup phone and Backblaze as one Community Videos lib
 
 1. Keep the Termux media server running on the backup phone.
 2. Create a Cloudflare Tunnel that forwards its private service to `http://127.0.0.1:8765`.
-3. Set the Worker's non-secret `PHONE_ORIGIN` variable to the tunnel's HTTPS hostname (origin only, no path).
-4. Install the Anilarper phone-server update that adds `GET /api/storage`.
+3. Set the Worker's non-secret `PHONE_STORAGE_URL` variable to the tunnel's HTTPS URL. This is the original working setting; `PHONE_ORIGIN` is also accepted as an alias. Keep the existing value if it is already configured.
+4. The original phone server already includes storage figures in `GET /api/videos`; the newer `GET /api/storage` endpoint is optional and takes precedence when available.
 5. Verify `GET /api/videos` from the Worker reports `storage.phone.online: true` and includes phone-hosted videos.
 
-The Worker then combines cloud catalog usage with the phone filesystem's used/total/free bytes. Cloud and phone video copies are deduplicated in the visible catalog when title and size match, while actual physical storage usage still counts both copies. Phone-hosted playback is proxied through the Worker and supports byte ranges.
+The Worker combines cloud catalog usage with phone media usage and phone media-usable capacity. It does not count the phone's operating-system/app usage as Anilarper media. Cloud and phone copies are deduplicated in the visible catalog when title and size match, while actual physical storage usage still counts both copies. Phone-hosted playback is proxied through the Worker and supports byte ranges.
 
 **Important:** this combines the library and capacity reporting; it does not turn Backblaze's 10 GB upload quota into a larger B2 quota. Videos stored on the phone are served from the phone, so the phone must have power, internet, and Termux running. If the phone is offline, its videos cannot be streamed and its storage is temporarily excluded from the live total.
 
