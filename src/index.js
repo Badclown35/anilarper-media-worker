@@ -261,8 +261,11 @@ async function handleApi(request, env, url) {
     const [catalog, phone] = await Promise.all([readCatalog(env), readPhoneLibrary(env)]);
     const cloudUsedBytes = catalog.videos.reduce((sum, v) => sum + Number(v.size || 0), 0);
     const pendingBytes = catalog.pending.reduce((sum, p) => sum + Number(p.size || 0), 0);
-    const phoneDiskUsed = phone.online ? phone.storage.usedBytes : 0;
-    const phoneTotal = phone.online ? phone.storage.totalBytes : 0;
+    // Count only Anilarper media as used space. System/apps already occupy
+    // part of the phone filesystem, so usable media capacity is media + free.
+    const phoneMediaUsed = phone.online ? phone.storage.mediaBytes : 0;
+    const phoneFree = phone.online ? phone.storage.freeBytes : 0;
+    const phoneMediaCapacity = phoneMediaUsed + phoneFree;
     const cloudVideos = catalog.videos.map(v => ({ ...publicVideo(v), storageLocation: "cloud" }));
     const cloudKeys = new Set(catalog.videos.map(v => String(v.size || 0) + "|" + cleanText(v.title, 120).toLowerCase()));
     const phoneVideos = phone.videos
@@ -271,11 +274,11 @@ async function handleApi(request, env, url) {
     return json({
       videos: [...cloudVideos, ...phoneVideos],
       storage: {
-        usedBytes: cloudUsedBytes + phoneDiskUsed,
+        usedBytes: cloudUsedBytes + phoneMediaUsed,
         pendingBytes,
-        maxBytes: MAX_STORAGE_BYTES + phoneTotal,
+        maxBytes: MAX_STORAGE_BYTES + phoneMediaCapacity,
         cloud: { usedBytes: cloudUsedBytes, pendingBytes, maxBytes: MAX_STORAGE_BYTES },
-        phone: phone.online ? { usedBytes: phoneDiskUsed, mediaBytes: phone.storage.mediaBytes, freeBytes: phone.storage.freeBytes, totalBytes: phoneTotal, online: true } : { online: false },
+        phone: phone.online ? { usedBytes: phoneMediaUsed, mediaBytes: phoneMediaUsed, freeBytes: phoneFree, totalBytes: phoneMediaCapacity, online: true } : { online: false },
         phoneOnline: phone.online
       }
     });
