@@ -108,17 +108,38 @@ function publicVideo(v) {
   return { id: v.id, title: v.title, category: v.category, size: v.size, modified: v.modified, streamPath: "/media/" + v.id };
 }
 
+function phoneStorageOrigin(env) {
+  const raw = String(env.PHONE_ORIGIN || env.PHONE_STORAGE_URL || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return "";
+    return url.origin + url.pathname.replace(/\/$/, "");
+  } catch (_) {
+    return "";
+  }
+}
+
 async function readPhoneLibrary(env) {
-  const origin = String(env.PHONE_ORIGIN || "").replace(/\/$/, "");
+  const origin = phoneStorageOrigin(env);
   if (!origin) return { online: false, videos: [], storage: null };
   try {
-    const [catalogResponse, storageResponse] = await Promise.all([
-      fetch(origin + "/api/videos", { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) }),
-      fetch(origin + "/api/storage", { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) })
-    ]);
-    if (!catalogResponse.ok || !storageResponse.ok) throw new Error("Phone server unavailable");
+    const catalogResponse = await fetch(origin + "/api/videos", {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!catalogResponse.ok) throw new Error("Phone catalog unavailable");
     const catalog = await catalogResponse.json();
-    const storage = await storageResponse.json();
+    let storage = catalog.storage || {};
+    // Newer phone builds expose a dedicated storage endpoint. Older working
+    // builds returned the same media-only figures inside /api/videos.
+    try {
+      const storageResponse = await fetch(origin + "/api/storage", {
+        headers: { "Accept": "application/json" },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (storageResponse.ok) storage = await storageResponse.json();
+    } catch (_) { /* Use the storage object included in the catalog response. */ }
     const videos = (Array.isArray(catalog.videos) ? catalog.videos : []).map(v => ({
       id: "phone--" + String(v.id || ""),
       title: cleanText(v.title, 120),
@@ -126,15 +147,17 @@ async function readPhoneLibrary(env) {
       size: Number(v.size || 0),
       modified: Number(v.modified || 0),
       streamPath: "/media/phone--" + String(v.id || "")
-    })).filter(v => /^phone--[A-Za-z0-9._ -]+\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
+    })).filter(v => /^phone--[A-Za-z0-9._ -]+\\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
+    const mediaBytes = Number(storage.mediaBytes ?? storage.usedBytes ?? 0);
+    const freeBytes = Number(storage.availableBytes ?? storage.freeBytes ?? 0);
     return {
       online: true,
       videos,
       storage: {
         totalBytes: Number(storage.totalBytes || 0),
         usedBytes: Number(storage.usedBytes || 0),
-        freeBytes: Number(storage.freeBytes || 0),
-        mediaBytes: Number(storage.mediaBytes || 0)
+        freeBytes,
+        mediaBytes
       }
     };
   } catch (_) {
@@ -143,7 +166,7 @@ async function readPhoneLibrary(env) {
 }
 
 async function streamPhoneMedia(request, env, filename) {
-  const origin = String(env.PHONE_ORIGIN || "").replace(/\/$/, "");
+  const origin = phoneStorageOrigin(env);
   if (!origin || !/^[A-Za-z0-9._ -]+\.mp4$/i.test(filename)) return json({ error: "Phone video unavailable." }, 404);
   const headers = new Headers();
   const range = request.headers.get("Range");
