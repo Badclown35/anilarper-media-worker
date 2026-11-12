@@ -312,7 +312,7 @@ test("original PHONE_STORAGE_URL tunnel and embedded media-only storage remain c
     const response = await worker.fetch(request("/api/videos"), e);
     assert.equal(response.status, 200);
     const data = await response.json();
-    assert.equal(data.phoneOnline, true);
+    assert.equal(data.storage.phone.online, true);
     assert.equal(data.videos[0].id, "phone--original.mp4");
     assert.equal(data.storage.phone.usedBytes, 12);
     assert.equal(data.storage.phone.totalBytes, 1000);
