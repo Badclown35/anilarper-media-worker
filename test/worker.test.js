@@ -295,7 +295,7 @@ test("original PHONE_STORAGE_URL tunnel and embedded media-only storage remain c
     if (url.pathname === "/api/videos") {
       return Response.json({
         videos: [{ id: "original.mp4", title: "Original Phone Video", category: "Anime", size: 12 }],
-        storage: { usedBytes: 12, pendingBytes: 0, availableBytes: 988, maxBytes: 1000 }
+        storage: { usedBytes: 12, pendingBytes: 3, availableBytes: 988, maxBytes: 1003 }
       });
     }
     if (url.pathname === "/api/storage") return new Response("not found", { status: 404 });
@@ -315,7 +315,9 @@ test("original PHONE_STORAGE_URL tunnel and embedded media-only storage remain c
     assert.equal(data.storage.phone.online, true);
     assert.equal(data.videos[0].id, "phone--original.mp4");
     assert.equal(data.storage.phone.usedBytes, 12);
-    assert.equal(data.storage.phone.totalBytes, 1000);
+    assert.equal(data.storage.phone.pendingBytes, 3);
+    assert.equal(data.storage.phone.totalBytes, 1003);
+    assert.equal(data.storage.pendingBytes, 3);
     assert.ok(calls.includes("/api/storage"));
 
     const streamed = await worker.fetch(request("/media/phone--original.mp4", {
