@@ -282,3 +282,48 @@ test("phone storage joins the community catalog and streams byte ranges", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("original PHONE_STORAGE_URL tunnel and embedded media-only storage remain compatible", async () => {
+  const e = env();
+  e.PHONE_STORAGE_URL = "https://original-phone-tunnel.example";
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    calls.push(url.pathname);
+    if (url.pathname === "/api/videos") {
+      return Response.json({
+        videos: [{ id: "original.mp4", title: "Original Phone Video", category: "Anime", size: 12 }],
+        storage: { usedBytes: 12, pendingBytes: 0, availableBytes: 988, maxBytes: 1000 }
+      });
+    }
+    if (url.pathname === "/api/storage") return new Response("not found", { status: 404 });
+    if (url.pathname === "/media/original.mp4") {
+      return new Response(new Uint8Array([7, 8]), {
+        status: 206,
+        headers: { "Content-Type": "video/mp4", "Content-Length": "2",
+          "Content-Range": "bytes 1-2/12", "Accept-Ranges": "bytes" }
+      });
+    }
+    throw new Error("Unexpected original phone request: " + url.pathname);
+  };
+  try {
+    const response = await worker.fetch(request("/api/videos"), e);
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.phoneOnline, true);
+    assert.equal(data.videos[0].id, "phone--original.mp4");
+    assert.equal(data.storage.phone.usedBytes, 12);
+    assert.equal(data.storage.phone.totalBytes, 1000);
+    assert.ok(calls.includes("/api/storage"));
+
+    const streamed = await worker.fetch(request("/media/phone--original.mp4", {
+      headers: { Range: "bytes=1-2" }
+    }), e);
+    assert.equal(streamed.status, 206);
+    assert.equal(streamed.headers.get("Content-Range"), "bytes 1-2/12");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
