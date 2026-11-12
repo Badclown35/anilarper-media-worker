@@ -147,7 +147,7 @@ async function readPhoneLibrary(env) {
       size: Number(v.size || 0),
       modified: Number(v.modified || 0),
       streamPath: "/media/phone--" + String(v.id || "")
-    })).filter(v => /^phone--[A-Za-z0-9._ -]+\\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
+    })).filter(v => /^phone--[A-Za-z0-9._ -]+\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
     const mediaBytes = Number(storage.mediaBytes ?? storage.usedBytes ?? 0);
     const freeBytes = Number(storage.availableBytes ?? storage.freeBytes ?? 0);
     return {
