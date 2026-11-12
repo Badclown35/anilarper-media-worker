@@ -149,6 +149,7 @@ async function readPhoneLibrary(env) {
       streamPath: "/media/phone--" + String(v.id || "")
     })).filter(v => /^phone--[A-Za-z0-9._ -]+\.mp4$/i.test(v.id) && Number.isSafeInteger(v.size) && v.size > 0);
     const mediaBytes = Number(storage.mediaBytes ?? storage.usedBytes ?? 0);
+    const pendingBytes = Number(storage.pendingBytes || 0);
     const freeBytes = Number(storage.availableBytes ?? storage.freeBytes ?? 0);
     return {
       online: true,
@@ -157,7 +158,8 @@ async function readPhoneLibrary(env) {
         totalBytes: Number(storage.totalBytes || 0),
         usedBytes: Number(storage.usedBytes || 0),
         freeBytes,
-        mediaBytes
+        mediaBytes,
+        pendingBytes
       }
     };
   } catch (_) {
@@ -287,8 +289,9 @@ async function handleApi(request, env, url) {
     // Count only Anilarper media as used space. System/apps already occupy
     // part of the phone filesystem, so usable media capacity is media + free.
     const phoneMediaUsed = phone.online ? phone.storage.mediaBytes : 0;
+    const phonePendingBytes = phone.online ? phone.storage.pendingBytes : 0;
     const phoneFree = phone.online ? phone.storage.freeBytes : 0;
-    const phoneMediaCapacity = phoneMediaUsed + phoneFree;
+    const phoneMediaCapacity = phoneMediaUsed + phonePendingBytes + phoneFree;
     const cloudVideos = catalog.videos.map(v => ({ ...publicVideo(v), storageLocation: "cloud" }));
     const cloudKeys = new Set(catalog.videos.map(v => String(v.size || 0) + "|" + cleanText(v.title, 120).toLowerCase()));
     const phoneVideos = phone.videos
@@ -298,10 +301,10 @@ async function handleApi(request, env, url) {
       videos: [...cloudVideos, ...phoneVideos],
       storage: {
         usedBytes: cloudUsedBytes + phoneMediaUsed,
-        pendingBytes,
+        pendingBytes: pendingBytes + phonePendingBytes,
         maxBytes: MAX_STORAGE_BYTES + phoneMediaCapacity,
         cloud: { usedBytes: cloudUsedBytes, pendingBytes, maxBytes: MAX_STORAGE_BYTES },
-        phone: phone.online ? { usedBytes: phoneMediaUsed, mediaBytes: phoneMediaUsed, freeBytes: phoneFree, totalBytes: phoneMediaCapacity, online: true } : { online: false },
+        phone: phone.online ? { usedBytes: phoneMediaUsed, pendingBytes: phonePendingBytes, mediaBytes: phoneMediaUsed, freeBytes: phoneFree, totalBytes: phoneMediaCapacity, online: true } : { online: false },
         phoneOnline: phone.online
       }
     });
