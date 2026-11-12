@@ -109,15 +109,17 @@ function publicVideo(v) {
 }
 
 function phoneStorageOrigin(env) {
-  const raw = String(env.PHONE_ORIGIN || env.PHONE_STORAGE_URL || "").trim();
-  if (!raw) return "";
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return "";
-    return url.origin + url.pathname.replace(/\/$/, "");
-  } catch (_) {
-    return "";
+  // Prefer the original, already-deployed setting; keep PHONE_ORIGIN as an alias.
+  for (const candidate of [env.PHONE_STORAGE_URL, env.PHONE_ORIGIN]) {
+    const raw = String(candidate || "").trim();
+    if (!raw) continue;
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) continue;
+      return url.origin + url.pathname.replace(/\/$/, "");
+    } catch (_) { /* Try the compatibility alias if the original value is invalid. */ }
   }
+  return "";
 }
 
 async function readPhoneLibrary(env) {
