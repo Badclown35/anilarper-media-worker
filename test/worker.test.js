@@ -287,10 +287,12 @@ test("phone storage joins the community catalog and streams byte ranges", async 
 test("original PHONE_STORAGE_URL tunnel and embedded media-only storage remain compatible", async () => {
   const e = env();
   e.PHONE_STORAGE_URL = "https://original-phone-tunnel.example";
+  e.PHONE_ORIGIN = "https://stale-phone-origin.example";
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async input => {
     const url = new URL(input);
+    assert.equal(url.origin, "https://original-phone-tunnel.example");
     calls.push(url.pathname);
     if (url.pathname === "/api/videos") {
       return Response.json({
